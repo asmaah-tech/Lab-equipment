@@ -728,6 +728,10 @@ body:not(.role-start) header .site-logo.department-logo img{
 .gpk-row{display:flex;align-items:center;gap:14px;margin-top:10px}
 .gpk-row label{margin:0;flex:0 0 auto;font-size:14px}
 .gpk-row select{flex:1;min-width:0}
+
+/* Edit/Add component dialog: Save stays visible while scrolling */
+#modal .dlg{max-height:calc(100vh - 32px);overflow-y:auto}
+#modal .dlg [data-save]{position:sticky;bottom:0;display:block;width:100%;padding:13px 16px;font-size:15px;z-index:5;box-shadow:0 -10px 14px -6px var(--card),0 6px 16px rgba(29,95,208,.25)}
 </style>
 
 </head>
@@ -966,13 +970,21 @@ async function loadRemote(){
 function startTechAutoRefresh(){
   if(techAutoRefreshTimer) clearInterval(techAutoRefreshTimer);
   techAutoRefreshTimer=setInterval(()=>{
-    if(authUser && authProfile?.role==='technician' && !$('tech').classList.contains('hidden')) loadRemote();
+    if(authUser && authProfile?.role==='technician' && !$('tech').classList.contains('hidden') && syncPending===0 && $('modal').classList.contains('hidden')) loadRemote();
   },4000);
 }
 function stopTechAutoRefresh(){if(techAutoRefreshTimer){clearInterval(techAutoRefreshTimer);techAutoRefreshTimer=null;}}
 
+let syncPending=0;
+function toast(text,cls){
+  let t=document.getElementById('saveToast');
+  if(!t){t=document.createElement('div');t.id='saveToast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;padding:11px 20px;border-radius:10px;font-weight:700;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.22);color:#fff;transition:opacity .25s';document.body.appendChild(t)}
+  t.textContent=text;t.style.background=cls==='err'?'#b3261e':'#1d7a46';t.style.opacity='1';
+  clearTimeout(t._h);t._h=setTimeout(()=>{t.style.opacity='0'},cls==='err'?6000:2200);
+}
 function syncRemote(){
   if(!remoteReady)return Promise.resolve();
+  syncPending++;
   syncChain=syncChain.then(async()=>{
     const role=authProfile?.role||null;
     // Student requests are inserted directly on submission using the database-generated ID.
@@ -995,7 +1007,9 @@ function syncRemote(){
     const {error:clearBlockedErr}=await db.from('blocked_students').delete().neq('id','00000000-0000-0000-0000-000000000000');if(clearBlockedErr)throw clearBlockedErr;
     const blocked=S.cfg.blocked.map(b=>({student_id:b.sid,reason:b.reason||null}));if(blocked.length){const {error}=await db.from('blocked_students').insert(blocked);if(error)throw error;}
     const groupsNow=groups();if(groupsNow.length){const {error}=await db.from('equipment_groups').upsert(groupsNow.map(name=>({name})),{onConflict:'name'});if(error)throw error;}
-  }).catch(err=>{console.error('Supabase sync failed:',err);note('msg','The shared database update failed. Check your permissions or RLS policies.','err');});
+  }).then(()=>{if(authProfile?.role==='technician')toast('✓ Changes saved','ok')})
+  .catch(err=>{console.error('Supabase sync failed:',err);note('msg','The shared database update failed. Check your permissions or RLS policies.','err');toast('Save failed — changes were NOT stored. Check your connection or permissions.','err')})
+  .finally(()=>{syncPending--});
   return syncChain;
 }
 
