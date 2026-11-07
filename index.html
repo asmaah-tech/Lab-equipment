@@ -877,6 +877,7 @@ let authUser=null, authProfile=null, studentAuthed=false;
 let S={eq:JSON.parse(JSON.stringify(SEED)),rq:[],n:1,cfg:{...defaultCfg},v:2};
 S.eq.forEach(mig);
 let remoteReady=false, syncChain=Promise.resolve();
+  let studentCatalogReady=false;
 let techAutoRefreshTimer=null, remoteLoadInProgress=false;
 
 function normalizeRequest(r){
@@ -959,12 +960,19 @@ async function loadRemote(){
       S.rq=S.rq.map(r=>{const p=r.user_id ? studentsById.get(r.user_id) : null; return p ? {...r,name:p.full_name||r.name,sid:p.student_id||r.sid} : r;});
     }
     remoteReady=true;
+    if(authProfile?.role==='student') studentCatalogReady=true;
     applyCfg();fillCats();renderAll();renderGK();
     note(role==='technician'?'tmsg':'smsg','Connected to the shared database successfully.','ok');
   }catch(err){
     console.error('Supabase load failed:',err);
     remoteReady=false;
-    applyCfg();fillCats();renderAll();
+if(authProfile?.role==='student'){
+  studentCatalogReady=false;
+  $('side').innerHTML='';
+  $('grid').innerHTML='<div class="empty">Could not load equipment. Check your connection and try again.</div>';
+}else{
+  applyCfg();fillCats();renderAll();
+}
     note(authProfile?.role==='technician'?'tmsg':'smsg','Could not connect to the shared database. Check your connection or permissions.','err');
   }finally{
     remoteLoadInProgress=false;
@@ -1037,6 +1045,11 @@ function fillCats(){
   $('cat').innerHTML='<option value="">All categories</option>'+cats.map(c=>'<option>'+esc(c)+'</option>').join('');
 }
 function renderGrid(){
+    if(authUser && !studentCatalogReady){
+    $('side').innerHTML='';
+    $('grid').innerHTML='<div class="empty">Loading equipment...</div>';
+    return;
+  }
   renderSide();
   const q=$('q').value.trim().toLowerCase(),c=$('cat').value;
   const list=S.eq.filter(e=>!isHidden(e.id)&&(!c||e.cat===c)&&(!q||(e.name+e.d).toLowerCase().includes(q))&&(!$('stock').checked||e.av>0)).sort((a,b)=>$('sort').value==='stock'?b.av-a.av:a.name.localeCompare(b.name));
@@ -1268,6 +1281,7 @@ $('studentLoginBtn').onclick=async()=>{
   const {data,error}=await db.auth.signInWithPassword({email,password});
   if(error){note('smsg',error.message,'err');return}
   authUser=data.user;
+  studentCatalogReady=false;
   document.body.classList.add('student-logged-in');
   $('cartBtn').style.display='inline-flex';
   // Do not wait for the profile query before opening the app.
@@ -1284,7 +1298,7 @@ $('studentLoginBtn').onclick=async()=>{
     loadRemote();
   });
 };
-$('studentLogout').onclick=async()=>{stopTechAutoRefresh();await db.auth.signOut();authUser=null;authProfile=null;studentAuthed=false;authed=false;cart={};document.body.classList.remove('student-logged-in');$('cartBtn').style.display='none';showRoleGate();};
+$('studentLogout').onclick=async()=>{stopTechAutoRefresh();await db.auth.signOut();authUser=null;studentCatalogReady=false;authProfile=null;studentAuthed=false;authed=false;cart={};document.body.classList.remove('student-logged-in');$('cartBtn').style.display='none';showRoleGate();};
 
 // Real Supabase Authentication for technicians
 $('loginBtn').onclick=async()=>{
